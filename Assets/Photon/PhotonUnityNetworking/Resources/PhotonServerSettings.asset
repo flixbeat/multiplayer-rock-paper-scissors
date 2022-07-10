@@ -43,6 +43,11 @@ MonoBehaviour:
   - Attack
   - Test
   - Damage
+  - ShowCanvasPick
+  - ChangeTurn
+  - SetPlayerTurn
+  - SetTurn
+  - Pick
   DisableAutoOpenWizard: 1
   ShowSettings: 1
   DevRegionSetOnce: 1

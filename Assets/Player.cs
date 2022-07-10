@@ -1,7 +1,8 @@
-using ExitGames.Client.Photon;
+using System.Collections;
 using Photon.Pun;
 using UnityEngine;
 using UnityEngine.UI;
+using Hashtable = ExitGames.Client.Photon.Hashtable;
 using Random = UnityEngine.Random;
 
 public class Player : MonoBehaviourPun, IPunObservable, IPunInstantiateMagicCallback
@@ -9,7 +10,7 @@ public class Player : MonoBehaviourPun, IPunObservable, IPunInstantiateMagicCall
     [SerializeField] private Text hp;
     [SerializeField] private Text name;
     
-    private int damage = 10;
+    private int damage = 1;
 
     [HideInInspector] public int x;
     
@@ -23,36 +24,47 @@ public class Player : MonoBehaviourPun, IPunObservable, IPunInstantiateMagicCall
         Vector2 position = playersCount == 1 ? spawnPointA.transform.position : spawnPointB.transform.position;
         transform.parent = canvas.transform;
         transform.position = position;
-        SetHp(100);
+        SetHp(3);
     }
     
+    // invoked when a player has been instantiated using PhotonNetwork.Instantiate
     public void OnPhotonInstantiate(PhotonMessageInfo info)
     {
+        // create a custom property (to be shared and read by other players)
         Hashtable prop = new Hashtable();
         x = Random.Range(0, 99);
         prop["test"] = x;
-        info.Sender.TagObject = gameObject;
+
+        // set name via nickname
         name.text = info.Sender.NickName;
-        print($"{x} generated for {info.Sender.NickName}");
+        
+        // set the TagObject to this game object for other player to reference this object
+        // can be accessed by looping all players in the room, eg. PhotonNetwork.CurrentRoom.Players
+        info.Sender.TagObject = gameObject;
     }
 
     private void SetHp(int val)
     {
+        // automatically synced to the network due to OnPhotonSerializeView
         hp.text = $"HP: {val}";
     }
 
+    // inflict damage to self
     [PunRPC]
     private void Damage()
     {
+        // if not owned, don't do anything
         if (!photonView.IsMine)
             return;
         
+        // get current hp and deduct damage
         string[] hpInfo = hp.text.Split(":");
         int curVal = int.Parse(hpInfo[1]);
         SetHp(curVal - damage);
     }
     
-    // sync hp
+    // sync values over the network continually like Update(), whenever there is a change
+    // in the value of the variable it will be sent over the network and read by their remote copies
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
         // client original copy (sender/send values)
@@ -68,30 +80,4 @@ public class Player : MonoBehaviourPun, IPunObservable, IPunInstantiateMagicCall
             name.text = (string) stream.ReceiveNext();
         }
     }
-
-    private void Update()
-    {
-        if (Input.GetKeyUp(KeyCode.A))
-        {
-            if (!photonView.IsMine)
-                return;
-            
-            foreach (var p in PhotonNetwork.CurrentRoom.Players)
-            {
-                var player = p.Value;
-                GameObject playerGameObject = (GameObject) player.TagObject;
-                var nickname = player.NickName;
-                var view = playerGameObject.GetComponent<PhotonView>();
-                var playerScript = playerGameObject.GetComponent<Player>();
-                
-                print($"{nickname} has prop {playerScript.x} and view id of {view.ViewID}");
-
-                if (view.ViewID != photonView.ViewID)
-                    view.RPC(nameof(Damage),RpcTarget.All);
-            }
-            
-            print($"sender ({PhotonNetwork.NickName}) view id is: {photonView.ViewID}");
-        }
-    }
-
 }
