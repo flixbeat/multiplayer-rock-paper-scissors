@@ -21,6 +21,7 @@ public class PlayerController : MonoBehaviourPun, IPunInstantiateMagicCallback
     
     [SerializeField] private Text hp;
     [SerializeField] private Text name;
+    [SerializeField] private Text you;
 
     private const int damage = 1;
     private Transform spawnPointA;
@@ -44,6 +45,9 @@ public class PlayerController : MonoBehaviourPun, IPunInstantiateMagicCallback
     {
         Hp = hp;
         NickName = nickname;
+
+        if (photonView.IsMine)
+            you.gameObject.SetActive(true);
     }
 
     [PunRPC]

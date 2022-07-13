@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Photon.Pun;
 using Photon.Realtime;
 using UnityEngine;
+using UnityEngine.UI;
 using Random = UnityEngine.Random;
 
 public class GameManager : MonoBehaviourPunCallbacks
@@ -23,6 +24,7 @@ public class GameManager : MonoBehaviourPunCallbacks
     
     [SerializeField] private Canvas canvasPick;
     [SerializeField] private List<Sprite> rpsSprites = new List<Sprite>();
+    [SerializeField] private Text waiting;
     
     private PlayerController playerController;
     private GameObject leftHandGameObject;
@@ -97,6 +99,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         }
 
         canvasPick.gameObject.SetActive(myNickname.Equals(whosTurn));
+        waiting.gameObject.SetActive(!myNickname.Equals(whosTurn));
     }
     
     // get the player who's not turn right now
@@ -224,6 +227,8 @@ public class GameManager : MonoBehaviourPunCallbacks
     private void PostFight()
     {
         canvasPick.gameObject.SetActive(false);
+        waiting.gameObject.SetActive(true);
+        waiting.text = whosWinner.Equals(string.Empty) ? "TIE!" : $"{whosWinner } won!";
         
         StartCoroutine(DestroyHands());
     }
@@ -234,6 +239,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         photonView.RPC("SetWinner",RpcTarget.All,String.Empty);
         PhotonNetwork.Destroy(leftHandGameObject);
         PhotonNetwork.Destroy(rightHandGameObject);
+        waiting.text = "Waiting for the opponent to choose...";
         photonView.RPC("SetTurn",RpcTarget.All);
     }
 }
