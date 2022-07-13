@@ -1,9 +1,10 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Photon.Pun;
-using Unity.VisualScripting;
+using Photon.Realtime;
 using UnityEngine;
-using Hashtable = ExitGames.Client.Photon.Hashtable;
+using Random = UnityEngine.Random;
 
 public class GameManager : MonoBehaviourPunCallbacks
 {
@@ -12,215 +13,227 @@ public class GameManager : MonoBehaviourPunCallbacks
     public Canvas canvas;
     public Transform spawnPointA;
     public Transform spawnPointB;
-    
-    [SerializeField] private GameObject playerPrefab;
-    [SerializeField] private Canvas canvasPick;
 
-    private int whosTurnViewId;
+    [SerializeField] private Transform leftHandPos;
+    [SerializeField] private Transform rightHandPos;
+    
+    [SerializeField] private GameObject leftHand;
+    [SerializeField] private GameObject rightHand;
+    [SerializeField] private GameObject playerPrefab;
+    
+    [SerializeField] private Canvas canvasPick;
+    [SerializeField] private List<Sprite> rpsSprites = new List<Sprite>();
+    
+    private PlayerController playerController;
+    private GameObject leftHandGameObject;
+    private GameObject rightHandGameObject;
+    private string whosTurn;
+    private string whosWinner;
+    private string myNickname;
 
     private void Awake()
     {
         if (!Instance)
             Instance = this;
+
+        myNickname = PhotonNetwork.NickName;
     }
 
     private void Start()
     {
-        PhotonNetwork.Instantiate(playerPrefab.name,Vector3.zero, Quaternion.identity);
+        GameObject player = PhotonNetwork.Instantiate(playerPrefab.name, Vector3.zero, Quaternion.identity);
+        playerController = player.GetComponent<PlayerController>();
+        
+        photonView.RPC("ShowPlayerInfo",RpcTarget.AllBuffered);
     }
-    
 
-    // invoked when other player joined (max players 2 - as defined in launcher)
     public override void OnJoinedRoom()
     {
-        StartCoroutine(StartGame());
-        
-        // check for player data if set
-        bool HasAllPlayersLoaded()
-        {
-            foreach (var p in PhotonNetwork.CurrentRoom.Players)
-            {
-                var player = p.Value;
-                GameObject playerObject = (GameObject) player.TagObject;
-                if (playerObject == null)
-                    return false;
-            }
-
-            return true;
-        }
-
-        IEnumerator StartGame()
-        {
-            List<GameObject> players = new List<GameObject>();
-
-            // continually check if all player data is set
-            yield return new WaitUntil(HasAllPlayersLoaded);
-            
-            // add to list of players
-            foreach (var p in PhotonNetwork.CurrentRoom.Players)
-            {
-                var player = p.Value;
-                GameObject playerObject = (GameObject) player.TagObject;
-                players.Add(playerObject);
-            }
-
-            // give turn to random player
-            int randomPlayerIndex = Random.Range(0, players.Count);
-            int viewId = players[1].GetComponent<PhotonView>().ViewID;
-            photonView.RPC("SetTurn",RpcTarget.All,viewId);
-        }
+        photonView.RPC("SetTurn",RpcTarget.All);
     }
 
     [PunRPC]
-    private void SetTurn(int viewId, PhotonMessageInfo info)
+    private void ShowPlayerInfo()
     {
-        whosTurnViewId = viewId;
+        playerController.photonView.RPC("SetInfo",RpcTarget.All,myNickname,3);
+    }
+
+    [PunRPC]
+    private void ShowHand(int lIndex, int rIndex)
+    {
+        leftHandGameObject = PhotonNetwork.Instantiate(leftHand.name, Vector2.zero, leftHand.transform.rotation);
+        leftHandGameObject.transform.parent = leftHandPos;
+        leftHandGameObject.transform.localPosition = Vector2.zero;
+
+        rightHandGameObject = PhotonNetwork.Instantiate(rightHand.name, Vector2.zero, rightHand.transform.rotation);
+        rightHandGameObject.transform.parent = rightHandPos;
+        rightHandGameObject.transform.localPosition = Vector2.zero;
         
-        foreach (var p in PhotonNetwork.CurrentRoom.Players)
-        {
-            var player = p.Value;
-            GameObject playerObject = (GameObject) player.TagObject;
-            PhotonView playerPhotonView = playerObject.GetComponent<PhotonView>();
-            
-            if (playerPhotonView.ViewID == viewId)
-            {
-                ShowCanvas(playerPhotonView);
-                print("turn given to: " + player.NickName);
-                break;
-            }
-        }
-    }
-
-    private void ShowCanvas(PhotonView photonView)
-    {
-        if(photonView.IsMine)
-            canvasPick.gameObject.SetActive(true);
-    }
-
-    // called via button onclick
-    public void OnPickButtonClicked(string chosen)
-    {
-        photonView.RPC(nameof(Pick),RpcTarget.All,chosen);
+        Hand lHand = leftHandGameObject.GetComponent<Hand>();
+        lHand.SetSprite(rpsSprites[lIndex]);
+        
+        Hand rHand = rightHandGameObject.GetComponent<Hand>();
+        rHand.SetSprite(rpsSprites[rIndex]);
     }
     
     [PunRPC]
-    private void Pick(string chosen)
+    private void InflictDamage()
     {
-        canvasPick.gameObject.SetActive(false);
-        
-        if (!photonView.IsMine)
-            return;
-        
-        foreach (var p in PhotonNetwork.CurrentRoom.Players)
-        {
-            var player = p.Value;
-            GameObject playerObject = (GameObject) player.TagObject;
-            PhotonView playerPhotonView = playerObject.GetComponent<PhotonView>();
-
-            if (playerPhotonView.ViewID == whosTurnViewId)
-            {
-                Hashtable prop = new Hashtable();
-                prop["pick"] = chosen;
-                player.CustomProperties = prop;
-                print($"{playerPhotonView.Owner} choose {chosen}");
-                photonView.RPC("SetTurn",RpcTarget.All,GetOtherPlayerView(playerPhotonView.ViewID).ViewID);
-                break;
-            }
-        }
-
-        if(!IsOtherPlayerWaitingToChoose())
-            Fight();
+        PhotonView photonView = playerController.GetComponent<PhotonView>();
+        photonView.RPC("DeductLife",RpcTarget.All,whosWinner);
     }
 
-    private PhotonView GetOtherPlayerView(int referenceViewId)
+    [PunRPC]
+    private void SetTurn()
     {
-        foreach (var p in PhotonNetwork.CurrentRoom.Players)
+        if (whosTurn == String.Empty)
         {
-            var player = p.Value;
-            GameObject playerObject = (GameObject) player.TagObject;
-            PhotonView playerPhotonView = playerObject.GetComponent<PhotonView>();
-
-            if (playerPhotonView.ViewID != referenceViewId)
-                return playerPhotonView;
+            int rand = Random.Range(0, 2);
+            whosTurn = PhotonNetwork.PlayerList[rand].NickName;
+        }
+        else
+        {
+            whosTurn = GetOtherPlayer().NickName;
         }
 
-        print($"unable to get other player photon view id");
+        canvasPick.gameObject.SetActive(myNickname.Equals(whosTurn));
+    }
+    
+    // get the player who's not turn right now
+    private Player GetOtherPlayer()
+    {
+        foreach (var player in PhotonNetwork.PlayerList)
+        {
+            if (!player.NickName.Equals(whosTurn))
+                return player;
+        }
+
         return null;
+    }
+
+    private void GetPlayerObjects()
+    {
+        foreach (var player in PhotonNetwork.PlayerList)
+        {
+            PlayerController playerController = (PlayerController) player.TagObject;
+        }
+    }
+
+    public void Pick(string type)
+    {
+        PhotonView playerPhotonView = playerController.GetComponent<PhotonView>();
+        playerPhotonView.RPC("Pick",RpcTarget.All,type);
+        Fight();
     }
 
     private void Fight()
     {
-        List<Photon.Realtime.Player> players = new List<Photon.Realtime.Player>();
+        PlayerController otherPlayer = (PlayerController) GetOtherPlayer().TagObject;
+        string otherPlayerPicked = otherPlayer.picked;
+        int lIndex = -1;
+        int rIndex = -1;
         
-        foreach (var p in PhotonNetwork.CurrentRoom.Players)
+        // check if the other player haven't picked yet
+        if (otherPlayerPicked == String.Empty)
         {
-            var player = p.Value;
-            players.Add(player);
-        }
-
-        PhotonView playerA = ((GameObject) players[0].TagObject).GetComponent<PhotonView>();
-        PhotonView playerB = ((GameObject) players[1].TagObject).GetComponent<PhotonView>();
-        
-        string playerAPicked = (string) players[0].CustomProperties["pick"];
-        string playerBPicked = (string) players[1].CustomProperties["pick"];
-        
-        if(playerAPicked.Equals("rock") && playerBPicked.Equals("rock"))
-            print("tie");
-        else if (playerAPicked.Equals("paper") && playerBPicked.Equals("rock"))
-        {
-            print($"{players[0]} winner!");
-            playerB.RPC("Damage",RpcTarget.All);
-        }
-        else if (playerAPicked.Equals("scissors") && playerBPicked.Equals("rock"))
-        {
-            print($"{players[1]} winner!");
-            playerA.RPC("Damage",RpcTarget.All);
-        }
-
-        else if (playerAPicked.Equals("rock") && playerBPicked.Equals("paper"))
-        {
-            print($"{players[1]} winner!");
-            playerA.RPC("Damage",RpcTarget.All);
-        }
-        else if(playerAPicked.Equals("paper") && playerBPicked.Equals("paper"))
-            print("tie!");
-        else if (playerAPicked.Equals("scissors") && playerBPicked.Equals("paper"))
-        {
-            print($"{players[0]} winner!");
-            playerB.RPC("Damage",RpcTarget.All);
+            photonView.RPC("SetTurn",RpcTarget.All);
+            return;
         }
         
-        else if (playerAPicked.Equals("rock") && playerBPicked.Equals("scissors"))
+        // if both players have picked
+        if (playerController.picked.Equals("rock") && otherPlayerPicked.Equals("rock"))
         {
-            print($"{players[0]} winner!");
-            playerB.RPC("Damage",RpcTarget.All);
+            print("Tie!");
+            photonView.RPC("SetWinner",RpcTarget.All,string.Empty);
+            lIndex = 0;
+            rIndex = 0;
         }
-            
-        else if (playerAPicked.Equals("paper") && playerBPicked.Equals("scissors"))
+        else if (playerController.picked.Equals("rock") && otherPlayerPicked.Equals("paper"))
         {
-            print($"{players[1]} winner!");
-            playerA.RPC("Damage",RpcTarget.All);
+            print($"Winner: {otherPlayer.NickName}");
+            photonView.RPC("SetWinner",RpcTarget.All,otherPlayer.NickName);
+            lIndex = 0;
+            rIndex = 1;
         }
-        else if(playerAPicked.Equals("scissors") && playerBPicked.Equals("scissors"))
-            print("tie!");
+        else if (playerController.picked.Equals("rock") && otherPlayerPicked.Equals("scissors"))
+        {
+            print($"Winner: {playerController.NickName}");
+            photonView.RPC("SetWinner",RpcTarget.All,playerController.NickName);
+            lIndex = 0;
+            rIndex = 2;
+        }
         
-        foreach (var p in PhotonNetwork.CurrentRoom.Players)
+        if (playerController.picked.Equals("paper") && otherPlayerPicked.Equals("rock"))
         {
-            var player = p.Value;
-            player.CustomProperties["pick"] = null;
+            print($"Winner: {playerController.NickName}");
+            photonView.RPC("SetWinner",RpcTarget.All,playerController.NickName);
+            lIndex = 1;
+            rIndex = 0;
         }
+        else if (playerController.picked.Equals("paper") && otherPlayerPicked.Equals("paper"))
+        {
+            print($"Tie!");
+            photonView.RPC("SetWinner",RpcTarget.All,string.Empty);
+            lIndex = 1;
+            rIndex = 1;
+        }
+        else if (playerController.picked.Equals("paper") && otherPlayerPicked.Equals("scissors"))
+        {
+            print($"Winner: {otherPlayer.NickName}");
+            photonView.RPC("SetWinner",RpcTarget.All,otherPlayer.NickName);
+            lIndex = 1;
+            rIndex = 2;
+        }
+        
+        if (playerController.picked.Equals("scissors") && otherPlayerPicked.Equals("rock"))
+        {
+            print($"Winner: {otherPlayer.NickName}");
+            photonView.RPC("SetWinner",RpcTarget.All,otherPlayer.NickName);
+            lIndex = 2;
+            rIndex = 0;
+        }
+        else if (playerController.picked.Equals("scissors") && otherPlayerPicked.Equals("paper"))
+        {
+            print($"Winner: {playerController.NickName}");
+            photonView.RPC("SetWinner",RpcTarget.All,playerController.NickName);
+            lIndex = 2;
+            rIndex = 1;
+        }
+        else if (playerController.picked.Equals("scissors") && otherPlayerPicked.Equals("scissors"))
+        {
+            print($"Tie!");
+            photonView.RPC("SetWinner",RpcTarget.All,string.Empty);
+            lIndex = 2;
+            rIndex = 2;
+        }
+        
+        playerController.GetComponent<PhotonView>().RPC("Pick", RpcTarget.All, String.Empty);
+        otherPlayer.GetComponent<PhotonView>().RPC("Pick", RpcTarget.All, String.Empty);
+        photonView.RPC("ShowHand",RpcTarget.All,lIndex,rIndex);
+        photonView.RPC("PostFight",RpcTarget.All);
+        photonView.RPC("InflictDamage",RpcTarget.All);
     }
 
-    private bool IsOtherPlayerWaitingToChoose()
+    [PunRPC]
+    private void SetWinner(string nickname)
     {
-        foreach (var p in PhotonNetwork.CurrentRoom.Players)
-        {
-            var player = p.Value;
-            if( string.IsNullOrEmpty((string) player.CustomProperties["pick"]) )
-                return true;
-        }
-
-        return false;
+        whosWinner = nickname;
     }
-    
+
+    [PunRPC]
+    private void PostFight()
+    {
+        canvasPick.gameObject.SetActive(false);
+        
+        StartCoroutine(DestroyHands());
+    }
+
+    private IEnumerator DestroyHands()
+    {
+        yield return new WaitForSeconds(3);
+        photonView.RPC("SetWinner",RpcTarget.All,String.Empty);
+        PhotonNetwork.Destroy(leftHandGameObject);
+        PhotonNetwork.Destroy(rightHandGameObject);
+        photonView.RPC("SetTurn",RpcTarget.All);
+    }
 }

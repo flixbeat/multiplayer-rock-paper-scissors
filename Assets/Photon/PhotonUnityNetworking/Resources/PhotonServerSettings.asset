@@ -48,6 +48,18 @@ MonoBehaviour:
   - SetPlayerTurn
   - SetTurn
   - Pick
+  - ShowRpsSprites
+  - ShowRps
+  - Spawn
+  - ShowRPS
+  - ShowHand
+  - ShowPlayerInfo
+  - SetInfo
+  - DeductLife
+  - InflictDamageTo
+  - InflictDamage
+  - PostFight
+  - SetWinner
   DisableAutoOpenWizard: 1
   ShowSettings: 1
   DevRegionSetOnce: 1
